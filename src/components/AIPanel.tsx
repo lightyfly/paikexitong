@@ -62,7 +62,12 @@ export function AIPanel(props: {
       setDiagnosticText(text)
       toast.push({ type: 'success', title: '诊断完成' })
     } catch (e: any) {
-      toast.push({ type: 'error', title: '诊断失败', detail: String(e?.message || e) })
+      const msg = String(e?.message || e)
+      toast.push({
+        type: 'error',
+        title: '诊断失败',
+        detail: msg.includes('Failed to fetch') ? '网络/代理未配置（需通过 /api/gemini 代理访问）' : msg,
+      })
     }
   }
 
@@ -79,7 +84,12 @@ export function AIPanel(props: {
       setOutlineText(text)
       toast.push({ type: 'success', title: '已生成教学要点' })
     } catch (e: any) {
-      toast.push({ type: 'error', title: '生成失败', detail: String(e?.message || e) })
+      const msg = String(e?.message || e)
+      toast.push({
+        type: 'error',
+        title: '生成失败',
+        detail: msg.includes('Failed to fetch') ? '网络/代理未配置（需通过 /api/gemini 代理访问）' : msg,
+      })
     }
   }
 
@@ -95,7 +105,7 @@ export function AIPanel(props: {
         system,
         parts: [
           { text: prompt },
-          { inline_data: { mime_type: img.mime, data: img.data } },
+          { inlineData: { mimeType: img.mime, data: img.data } },
         ],
       })
 
@@ -103,9 +113,14 @@ export function AIPanel(props: {
       const parsed = extractJsonFromText(text)
       if (!parsed || typeof parsed !== 'object') throw new Error('无法解析识别结果 JSON')
       props.onImportPartialState(parsed as any)
-      toast.push({ type: 'success', title: '已导入识图结果', detail: '请检查并保存到云端' })
+      toast.push({ type: 'success', title: '已导入识图结果', detail: '请检查并等待自动保存' })
     } catch (e: any) {
-      toast.push({ type: 'error', title: '识图导入失败', detail: String(e?.message || e) })
+      const msg = String(e?.message || e)
+      toast.push({
+        type: 'error',
+        title: '识图导入失败',
+        detail: msg.includes('Failed to fetch') ? '网络/代理未配置（需通过 /api/gemini 代理访问）' : msg,
+      })
     }
   }
 
@@ -137,6 +152,14 @@ export function AIPanel(props: {
         apiKey,
         model: 'gemini-2.5-flash-preview-tts',
         parts: [{ text }],
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: 'Aoede',
+            },
+          },
+        },
       })
       const audio = extractInlineData(resp)
       if (!audio) throw new Error('未返回音频数据（inlineData）')
@@ -147,7 +170,12 @@ export function AIPanel(props: {
       }
       toast.push({ type: 'success', title: '已开始播报' })
     } catch (e: any) {
-      toast.push({ type: 'error', title: 'TTS 失败', detail: String(e?.message || e) })
+      const msg = String(e?.message || e)
+      toast.push({
+        type: 'error',
+        title: 'TTS 失败',
+        detail: msg.includes('Failed to fetch') ? '网络/代理未配置（需通过 /api/gemini 代理访问）' : msg,
+      })
     }
   }
 

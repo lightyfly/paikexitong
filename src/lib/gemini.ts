@@ -2,7 +2,6 @@ import { withBackoffRetry } from './retry'
 
 type GeminiPart =
   | { text: string }
-  | { inline_data: { mime_type: string; data: string } }
   | { inlineData: { mimeType: string; data: string } }
 
 type GeminiResponse = {
@@ -34,13 +33,15 @@ export async function geminiGenerateContent(opts: {
   parts: GeminiPart[]
   system?: string
   responseMimeType?: string
+  responseModalities?: Array<'TEXT' | 'AUDIO'>
+  speechConfig?: any
 }) {
   const apiKey = String(opts.apiKey || '').trim()
   if (!apiKey) throw new Error('Gemini API key missing')
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    opts.model,
-  )}:generateContent?key=${encodeURIComponent(apiKey)}`
+  // Use same-origin proxy to avoid browser CORS.
+  // In dev, Vite proxies /api/gemini -> https://generativelanguage.googleapis.com/v1beta
+  const url = `/api/gemini/models/${encodeURIComponent(opts.model)}:generateContent?key=${encodeURIComponent(apiKey)}`
 
   const body = {
     contents: [
@@ -60,6 +61,8 @@ export async function geminiGenerateContent(opts: {
     generationConfig: {
       temperature: 0.2,
       ...(opts.responseMimeType ? { responseMimeType: opts.responseMimeType } : {}),
+      ...(opts.responseModalities ? { responseModalities: opts.responseModalities } : {}),
+      ...(opts.speechConfig ? { speechConfig: opts.speechConfig } : {}),
     },
   }
 
