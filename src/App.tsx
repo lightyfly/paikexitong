@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarDays, HardDriveDownload, LayoutGrid, Settings2, Sparkles } from 'lucide-react'
 import { ToastProvider, useToast } from './components/Toast'
 import { Button } from './components/ui'
@@ -28,6 +28,11 @@ function AppInner() {
   const [archivesOpen, setArchivesOpen] = useState(false)
   const [archivesVersion, setArchivesVersion] = useState(0)
   const [pendingDeleteWeeks, setPendingDeleteWeeks] = useState<string[]>([])
+
+  const [autoSaveState, setAutoSaveState] = useState<'ready' | 'pending' | 'saving' | 'error'>('ready')
+  const [lastSavedAt, setLastSavedAt] = useState<number>(0)
+  const lastSavedSigRef = useRef<string>('')
+  const autoSaveTimerRef = useRef<number | null>(null)
 
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     const last = loadLastSelectedDate()
@@ -88,10 +93,29 @@ function AppInner() {
     const sched = loadWeekSchedule(weekStartYmd) ?? {}
     dispatch({ type: 'setSchedule', schedule: sched })
     saveLastSelectedDate(selectedDate)
+
+    // treat loaded week as baseline (avoid auto-updating timestamps on open)
+    lastSavedSigRef.current = ''
   }, [dispatch, selectedDate, weekStartYmd])
 
-  const handleSaveToLocal = async () => {
+  const signatureNow = (pending: string[]) => {
+    return JSON.stringify({
+      config: {
+        teachers: state.teachers,
+        classes: state.classes,
+        periods: state.periods,
+        courses: state.courses,
+      },
+      weekStartYmd,
+      schedule: state.schedule,
+      pendingDeleteWeeks: [...pending].sort(),
+    })
+  }
+
+  const flushSaveToLocal = (opts?: { toast?: boolean }) => {
     try {
+      setAutoSaveState('saving')
+
       saveLocalConfig({
         teachers: state.teachers,
         classes: state.classes,
@@ -106,27 +130,64 @@ function AppInner() {
         saveWeekSchedule(weekStartYmd, state.schedule)
       }
 
-      if (pending.size > 0) {
-        setPendingDeleteWeeks([])
-      }
-
+      if (pending.size > 0) setPendingDeleteWeeks([])
       setArchivesVersion((v) => v + 1)
 
-      if (pending.size > 0 && pending.has(String(weekStartYmd))) {
-        toast.push({ type: 'success', title: '已保存', detail: `已提交删除 ${String(pending.size)} 个周存档（当前周已删除）` })
-      } else if (pending.size > 0) {
-        toast.push({ type: 'success', title: '已保存', detail: `已保存本周，并提交删除 ${String(pending.size)} 个周存档` })
-      } else {
-        toast.push({ type: 'success', title: '已保存本周', detail: `已保存：${String(weekLabel)}` })
+      lastSavedSigRef.current = signatureNow([])
+      setLastSavedAt(Date.now())
+      setAutoSaveState('ready')
+
+      if (opts?.toast) {
+        if (pending.size > 0 && pending.has(String(weekStartYmd))) {
+          toast.push({ type: 'success', title: '已保存', detail: `已提交删除 ${String(pending.size)} 个周存档（当前周已删除）` })
+        } else if (pending.size > 0) {
+          toast.push({ type: 'success', title: '已保存', detail: `已自动保存本周，并提交删除 ${String(pending.size)} 个周存档` })
+        } else {
+          toast.push({ type: 'success', title: '已保存', detail: `已自动保存：${String(weekLabel)}` })
+        }
       }
     } catch (e: any) {
-      toast.push({ type: 'error', title: '本地保存失败', detail: String(e?.message || e) })
+      setAutoSaveState('error')
+      if (opts?.toast) toast.push({ type: 'error', title: '本地保存失败', detail: String(e?.message || e) })
     }
   }
 
+  useEffect(() => {
+    if (!state.hasLoaded) return
+
+    const sig = signatureNow(pendingDeleteWeeks)
+    if (!lastSavedSigRef.current) {
+      // first render for this week: set baseline and do not write
+      lastSavedSigRef.current = sig
+      setAutoSaveState('ready')
+      return
+    }
+    if (sig === lastSavedSigRef.current) return
+
+    setAutoSaveState('pending')
+    if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      flushSaveToLocal()
+    }, 900)
+
+    return () => {
+      if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current)
+      autoSaveTimerRef.current = null
+    }
+  }, [
+    state.hasLoaded,
+    state.teachers,
+    state.classes,
+    state.periods,
+    state.courses,
+    state.schedule,
+    pendingDeleteWeeks,
+    weekStartYmd,
+  ])
+
   const handleClearLocal = () => {
     dispatch({ type: 'clearLocalSchedule' })
-    toast.push({ type: 'info', title: '已清空本周 schedule（内存）', detail: 'localStorage 未变更；如需落盘请点击“保存本周”' })
+    toast.push({ type: 'info', title: '已清空本周课表', detail: '将自动保存到本地存档' })
   }
 
   const courseNames = Array.from(new Set(state.courses.map((c) => String(c.name)).filter((x) => x.trim().length > 0)))
@@ -284,7 +345,7 @@ function AppInner() {
                                     toast.push({
                                       type: 'info',
                                       title: '已标记删除',
-                                      detail: '当前仅从界面隐藏；点击“保存本周”后才会真正从本地删除。',
+                                      detail: '当前仅从界面隐藏；自动保存完成后才会真正从本地删除。',
                                     })
                                   }}
                                 >
@@ -302,8 +363,34 @@ function AppInner() {
             </div>
 
             <Button onClick={handleClearLocal}>清空本地</Button>
-            <Button variant="primary" onClick={handleSaveToLocal}>
-              保存本周
+            <div
+              className={
+                'inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold ring-1 ' +
+                (autoSaveState === 'error'
+                  ? 'bg-rose-50 text-rose-700 ring-rose-200'
+                  : autoSaveState === 'saving'
+                    ? 'bg-amber-50 text-amber-700 ring-amber-200'
+                    : autoSaveState === 'pending'
+                      ? 'bg-sky-50 text-sky-700 ring-sky-200'
+                      : 'bg-emerald-50 text-emerald-700 ring-emerald-200')
+              }
+              title={lastSavedAt ? `last saved: ${new Date(lastSavedAt).toLocaleString()}` : ''}
+            >
+              {autoSaveState === 'saving'
+                ? '自动保存中'
+                : autoSaveState === 'pending'
+                  ? '等待自动保存'
+                  : autoSaveState === 'error'
+                    ? '自动保存失败'
+                    : '自动保存已开启'}
+            </div>
+            <Button
+              variant="primary"
+              onClick={() => {
+                flushSaveToLocal({ toast: true })
+              }}
+            >
+              立即保存
             </Button>
           </div>
         </div>
@@ -360,6 +447,13 @@ function AppInner() {
               state={state}
               courseNames={courseNames}
               weekStartYmd={weekStartYmd}
+              ensureTempClassId={() => {
+                const existing = state.classes.find((c) => String(c.name).trim() === '临时加课')
+                if (existing) return existing.id
+                const id = `class_temp_${Date.now().toString(16)}`
+                dispatch({ type: 'setClasses', classes: [...state.classes, { id, name: '临时加课' }] })
+                return id
+              }}
               onUpsertUnit={({ classId, day, periodId, unit }) =>
                 dispatch({ type: 'upsertUnit', classId: String(classId), day: String(day), periodId: String(periodId), unit })
               }

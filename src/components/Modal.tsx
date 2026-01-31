@@ -6,13 +6,19 @@ export function Modal(props: {
   children: React.ReactNode
   onClose: () => void
   footer?: React.ReactNode
+  widthClassName?: string
+  bodyClassName?: string
 }) {
   if (!props.open) return null
+  const width = props.widthClassName ?? 'max-w-xl'
+  const bodyClass = props.bodyClassName ?? 'px-5 py-4'
   return (
     <div className="fixed inset-0 z-40">
       <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm" onClick={props.onClose} />
       <div className="absolute inset-0 flex items-center justify-center p-4">
-        <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-white/40 bg-white shadow-soft-lg">
+        <div
+          className={`flex w-full ${width} max-h-[90vh] flex-col overflow-hidden rounded-2xl border border-white/40 bg-white shadow-soft-lg`}
+        >
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
             <div className="font-display text-lg font-semibold text-slate-900">{String(props.title)}</div>
             <button
@@ -22,8 +28,8 @@ export function Modal(props: {
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="px-5 py-4">{props.children}</div>
-          {props.footer ? <div className="border-t border-slate-200 px-5 py-4">{props.footer}</div> : null}
+          <div className={`${bodyClass} flex-1 overflow-auto`}>{props.children}</div>
+          {props.footer ? <div className="shrink-0 border-t border-slate-200 px-5 py-4">{props.footer}</div> : null}
         </div>
       </div>
     </div>
